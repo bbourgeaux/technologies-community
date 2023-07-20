@@ -1,0 +1,10 @@
+version: v1
+type: APP
+id: saagie-code-search
+label: Saagie Code Search
+baseline: "Saagie Code Search"
+description: "Saagie-Code-Search: Custom app based on Flask that Saagie Code Search is a web application that enables the search for Python functions, either within a default codebase or GitHub repositories."
+available: true
+icon: datascience
+backgroundColor: "#253c5b"
+customFlags: []
