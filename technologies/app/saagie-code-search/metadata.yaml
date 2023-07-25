@@ -1,4 +1,4 @@
-version: v1
+version: v2
 type: APP
 id: saagie-code-search
 label: Saagie Code Search
@@ -8,3 +8,18 @@ available: true
 icon: datascience
 backgroundColor: "#253c5b"
 customFlags: []
+contexts:
+  - id: saagie-code-search
+    label: For Saagie 2
+    releaseNotes: ""
+    available: true
+    trustLevel: experimental
+    ports:
+      - port: 5000
+        name: saagie-code-search
+        rewriteUrl: True
+        basePath: SAAGIE_BASE_PATH
+    volumes: ["/opt", "/var/lib/postgresql/data"]
+    dockerInfo:
+      image: zbaptiste/code-search-app-repo
+      version: "1.4"
