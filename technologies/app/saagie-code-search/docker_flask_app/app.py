@@ -1,15 +1,19 @@
 from flask import Flask, render_template, request
-from utils import get_results, get_databases, load_model, load_codes_and_embeddings, get_functions_from_repo, encode_new_database
+from utils import get_databases, get_results, load_model, load_codes_and_embeddings, get_functions_from_repo, encode_new_database
 app = Flask(__name__)
 
 # Get the list of previously saved databases
-databases = get_databases()
+# databases = get_databases()
+
 # Load the model and the databases
-load_model() 
-load_codes_and_embeddings(databases)
+load_model()
+load_codes_and_embeddings()
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    # Get the list of previously saved databases
+    databases = get_databases()
+
     if request.method == 'POST':
         query = request.form['query']
         selected_database = request.form['database']
@@ -22,8 +26,9 @@ def index():
             # Encode those functions
             encode_new_database(new_database, functions, paths)
             # Update the list of databases
-            databases.append(new_database)
-            load_codes_and_embeddings(databases)
+            load_codes_and_embeddings()
+            databases = get_databases()
+
 
         # Get the search results
         results, path_results, similarities, colors = get_results(query, selected_database, databases, N=10)

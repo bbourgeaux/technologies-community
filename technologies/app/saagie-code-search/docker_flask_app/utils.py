@@ -6,15 +6,17 @@ from transformers import AutoTokenizer, AutoModel
 import requests
 from urllib.parse import urlparse
 import os
+import base64
 
-ACCESS_TOKEN = os.environ['COPILOT_GITHUB_API_KEY']
+GITHUB_ACCESS_TOKEN = os.environ['COPILOT_GITHUB_API_KEY']
+# HF_ACCESS_TOKEN = os.environ['COPILOT_HF_API_KEY']
+HF_ACCESS_TOKEN = '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'
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-DATABASES_DIR = './data'
+DATABASES_DIR = './data/'
 TOKENIZER = AutoTokenizer.from_pretrained("distilroberta-base")
-PRETRAINED_MODEL_NAME = 'distilroberta-base'
-FINETUNED_MODEL_NAME = 'distilroberta_2.86.pt'
-MODEL_PATH = './model/' + FINETUNED_MODEL_NAME
+HF_MODEL_NAME = 'TeamResearch/SaagieCodeSearch'
 TAU = 20.
 SEQ_LEN = 128
 
@@ -22,7 +24,8 @@ class AutoModelForSentenceEmbedding(nn.Module):
     def __init__(self, model_name, tokenizer, tau, normalize=True):
         super(AutoModelForSentenceEmbedding, self).__init__()
 
-        self.model = AutoModel.from_pretrained(model_name)
+        # self.model = AutoModel.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_name, use_auth_token=HF_ACCESS_TOKEN)
         self.normalize = normalize
         self.tokenizer = tokenizer
         self.tau = nn.Parameter(torch.tensor(tau), requires_grad=True) # Trainable parameter tau
@@ -39,71 +42,65 @@ class AutoModelForSentenceEmbedding(nn.Module):
         token_embeddings = model_output[0]  # First element of model_output contains all token embeddings
         input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
         return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-    
-def get_databases(databases_dir=DATABASES_DIR):
-    csv_files = []
-    for file in os.listdir(databases_dir):
-        if file.endswith(".csv"):
-            csv_files.append(os.path.splitext(file)[0].replace('_','/'))
-    return csv_files
-
 
 def load_model():
     """Loads a trained model stored in a .pt file"""
     global model
-    # Check the available CUDA devices
-    cuda_device_count = torch.cuda.device_count()
-    # print("CUDA device count:", cuda_device_count)
-
-    # Load the state_dict and map tensors to the existing CUDA device
-    if cuda_device_count > 0:
-        map_location = f'cuda:{torch.cuda.current_device()}'
-    else:
-        map_location = 'cpu'
-
-    state_dict = torch.load(MODEL_PATH, map_location=map_location)
-
     # Create a new instance of your model
-    model = AutoModelForSentenceEmbedding(PRETRAINED_MODEL_NAME,
+    model = AutoModelForSentenceEmbedding(HF_MODEL_NAME,
                                       tokenizer=TOKENIZER,
                                       tau=TAU,
                                       normalize=True).to(device)
 
-    # Load the state_dict to the model
-    model.load_state_dict(state_dict)
+def get_databases(databases_dir=DATABASES_DIR):
+    return list(data.keys())
 
+def load_data_from_csv(csv_file):
+    """Returns codes, embeddings and paths saved in a given csv file."""
+    current_codes = []
+    current_paths = []
+    current_embeddings = []
 
-def load_codes_and_embeddings(databases):
+    with open(csv_file, mode='r') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            current_codes.append(row['code'])
+            current_embeddings.append(torch.tensor(eval(row['embedding'])))
+            if 'github' in csv_file:
+                current_name = row['name']
+                current_paths.append(row['path'])
+            else:
+                current_name = 'Open Source Repo (10k functions)'
+                current_paths.append(' ')
+    return current_name, current_codes, current_embeddings, current_paths
+    
+def load_codes_and_embeddings(databases_dir=DATABASES_DIR):
     """Loads the codes and embeddings of all databases"""
+    global data
+    data = dict()
 
-    data_dir = 'data/'
-    global loaded_codes
-    global loaded_paths
-    global loaded_embeddings
+    # Get all GitHub repo csv files
+    github_files = []
+    for file in os.listdir(databases_dir):
+        if file.endswith(".csv") and "github" in file:
+            github_files.append(os.path.splitext(file)[0])
 
-    loaded_codes = []
-    loaded_paths = []
-    loaded_embeddings = []
+    # Load default database
+    default_csv_file1 = './data/Open Source Repo (10k functions)_part1.csv'
+    default_csv_file2 = './data/Open Source Repo (10k functions)_part2.csv'
+    default_name_1, default_codes_1, default_embeddings_1, default_paths_1 = load_data_from_csv(default_csv_file1)
+    default_name_2, default_codes_2, default_embeddings_2, default_paths_2 = load_data_from_csv(default_csv_file2)
+    # Combine data
+    all_default_codes = default_codes_1 + default_codes_2
+    all_default_embeddings = default_embeddings_1 + default_embeddings_2
+    all_default_paths = default_paths_1 + default_paths_2
+    data["Open Source Repo (10k functions)"] = {"codes": all_default_codes, "embeddings": all_default_embeddings, "paths": all_default_paths}
 
-    for database in databases:
-        current_codes = []
-        current_paths = []
-        current_embeddings = []
-        csv_file = data_dir + database.replace('/','_') + '.csv'
-
-        with open(csv_file, mode='r') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                current_codes.append(row['code'])
-                current_embeddings.append(torch.tensor(eval(row['embedding'])))
-                if 'github' in database:
-                    current_paths.append(row['path'])
-                else:
-                    current_paths.append(' ')
-        loaded_codes.append(current_codes)
-        loaded_paths.append(current_paths)
-        loaded_embeddings.append(current_embeddings)
-
+    # Load GitHub databases
+    for github_file in github_files:
+        csv_file = databases_dir + github_file + '.csv'
+        name, codes, embeddings, paths = load_data_from_csv(csv_file)
+        data[name] = {"codes": codes, "embeddings": embeddings, "paths": paths}
 
 def encode_query(query, model, tokenizer, seq_len):
     """Returns the embedding of a given query, encoded by a given encoder, tokenizer, seq_len"""
@@ -137,8 +134,7 @@ def scale_similarities(similarities):
 def get_results(query, database, databases, N=5):
     """Given a NL query and a database of functions, returns the N most relevant functions and their similarities to the given query in the given database"""
     if database in databases:
-        db_index = databases.index(database)
-        embeddings, codes, paths = loaded_embeddings[db_index], loaded_codes[db_index], loaded_paths[db_index]
+        embeddings, codes, paths = data[database]["embeddings"], data[database]["codes"], data[database]["paths"]
     else:
         return ['Impossible to read the database'],[1.0]
     
@@ -168,12 +164,12 @@ def get_colors(similarities):
     return [get_color(sim) for sim in similarities]
 
 
-def get_python_files_from_repo(repo_url, access_token):
+def get_python_files_from_repo(repo_url, github_access_token):
     # Construct the API endpoint for the repository's contents
     contents_url = repo_url.replace("github.com", "api.github.com/repos") + "/contents"
 
     headers = {
-        "Authorization": f"Bearer {access_token}",
+        "Authorization": f"Bearer {github_access_token}",
         "Accept": "application/vnd.github.v3+json"
     }
 
@@ -243,7 +239,7 @@ def get_functions_from_file(file_url):
 def get_functions_from_repo(repo_url):
     all_functions = []
     all_paths = []
-    python_files = get_python_files_from_repo(repo_url, ACCESS_TOKEN)
+    python_files = get_python_files_from_repo(repo_url, GITHUB_ACCESS_TOKEN)
 
     def get_file_path(repo_url, file_url):
         repo_path = urlparse(repo_url).path.rstrip('/')
@@ -267,14 +263,25 @@ def encode_new_database(database_name, functions, paths, tokenizer=TOKENIZER, se
         code_am = tokenized_code['attention_mask']
         code_out = model(code.to(device),code_am.to(device))
 
-        data.append({'code': function, 'path': path, 'embedding': code_out.tolist()})
+        data.append({'name': database_name, 'code': function, 'path': path, 'embedding': code_out.tolist()})
         
     # Create file for storing all codes and embeddings
     repo_name = './data/' + database_name.replace('/','_') + '.csv'
     # Write in that file
     with open(repo_name, mode='w', newline='') as file:
-        fieldnames = ['code', 'path', 'embedding']
+        fieldnames = ['name', 'code', 'path', 'embedding']
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         for d in data:
-            writer.writerow({'code': d['code'], 'path': d['path'], 'embedding': str(d['embedding'])})
+            writer.writerow({'name': d['name'], 'code': d['code'], 'path': d['path'], 'embedding': str(d['embedding'])})
+
+def url_to_filename(repository_url):
+    # Encode the repository URL to Base64 and replace any '/' characters with '_'
+    encoded_url = base64.urlsafe_b64encode(repository_url.encode()).decode().replace("/", "_")
+    return f"{encoded_url}.csv"
+
+def filename_to_url(filename):
+    # Remove the '.csv' extension, decode from Base64, and replace '_' with '/'
+    encoded_url = os.path.splitext(filename)[0]
+    decoded_url = base64.urlsafe_b64decode(encoded_url.replace("_", "/")).decode()
+    return decoded_url
