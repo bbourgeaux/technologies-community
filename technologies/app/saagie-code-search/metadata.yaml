@@ -16,10 +16,10 @@ contexts:
     trustLevel: experimental
     ports:
       - port: 5000
-        name: saagie-code-search
+        name: myapp
         rewriteUrl: True
         basePath: SAAGIE_BASE_PATH
-    volumes: ["/opt", "/var/lib/postgresql/data"]
+    volumes: ["/data"]
     dockerInfo:
-      image: zbaptiste/code-search-app-repo
-      version: "1.4"
+      image: saagie/saagie-code-search
+      version: "0.1"
